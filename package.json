@@ -4,13 +4,14 @@
   "description": "Receive notifications from your node in your Telegram client",
   "main": "monitor.js",
   "scripts": {
-    "start": "node monitor.js",
+    "start": "BOT_TOKEN=123...456 INFURA_TOKEN=123...456 CHAT_ID=123...456 STAKER_ACCOUNT=0x123...456 node monitor.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Isaac Agudo",
   "license": "GPL-3.0-or-later",
   "dependencies": {
     "node-telegram-bot-api": "^0.50.0",
+    "telegraf": "^3.38.0",
     "web3": "^1.3.0"
   }
 }

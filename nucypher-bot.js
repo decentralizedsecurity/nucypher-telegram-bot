@@ -1,19 +1,13 @@
 const Web3 = require("web3");
 const BN = require('bignumber.js');
-const TelegramBot = require('node-telegram-bot-api');
+const Telegraf = require('telegraf');
+const { Markup } = Telegraf;
 
-// Replace the value below with the Telegram token you receive from @BotFather
+// Set proper environment variables before launch or run with BOT_TOKEN=123...456 INFURA_TOKEN=123..456 node nucypher-bot.js
 const token = process.env.BOT_TOKEN;
-
 const infura_token = process.env.INFURA_TOKEN;
 
 const web3 = new Web3(new Web3.providers.HttpProvider(`https://mainnet.infura.io/v3/${infura_token}`));
-
-// You can get it using this steps: https://stackoverflow.com/a/32572159
-const chatId = process.env.CHAT_ID;
-
-// Replace it with you staker accoount
-const account = process.env.STAKER_ACCOUNT;
 
 const { StakingEscrow } = require('./contract-registry');
 
@@ -26,18 +20,46 @@ const contracts = {
 
 const contract = new web3.eth.Contract(StakingEscrow, contracts.stakingEscrowAddress);
 
-// Create a bot that uses 'polling' to fetch new updates
-const bot = new TelegramBot(token, {polling: false});
+const bot = new Telegraf(token)
 
-function telegrambot (message, json) {
-  try {
-    bot.sendMessage(chatId, message + '\n\n<pre>' + JSON.stringify(json, null, 2) + '</pre>', {
-      parse_mode: 'html'
-    });
-  } catch (err) {
-    console.log('Something went wrong when trying to send a Telegram notification', err);
+bot.start(async (ctx) => {
+  if (!!ctx.startPayload && web3.utils.checkAddressChecksum(ctx.startPayload))
+  {
+    const account = ctx.startPayload;
+    const nodeInfo = await getNodeInfo(account);
+    if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
+    {
+      ctx.replyWithHTML(`Everything OK! \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
+    } else
+    {
+      ctx.replyWithHTML(`Something went wrong ... \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
+    }
+  } else
+  {
+    ctx.replyWithHTML(`You haven't provide an Ethereum addreess.\n\n Call /refresh with your staker address to get the node information`)
   }
-}
+})
+
+bot.command('refresh', async (ctx) => {
+  const account = ctx.update.message.text.slice(9);
+  if (!!account && web3.utils.checkAddressChecksum(account))
+  {
+    const nodeInfo = await getNodeInfo(account);
+    if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
+    {
+      ctx.replyWithHTML(`Everything OK! \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
+    } else
+    {
+      ctx.replyWithHTML(`Something went wrong ... \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
+    }
+  } else
+  {
+    ctx.replyWithHTML(`You haven't provide an Ethereum addreess.\n\n Call /refresh with your staker address to get the node information`)
+  }
+})
+
+
+bot.launch()
 
 class Node {
   constructor(obj) {
@@ -94,7 +116,7 @@ function toNumberOfTokens(amount) {
   return BN(Web3.utils.fromWei(amount.toString())).toNumber();
 }
 
-async function getNodeInfo() {
+async function getNodeInfo(account) {
   const node = new Node(await contract.methods.stakerInfo(account).call());
   node.lockedTokens = await contract.methods.getLockedTokens(account, 1).call();
   node.availableForWithdraw = toNumberOfTokens((new web3.utils.BN(node.totalStake)).sub(new web3.utils.BN(node.lockedTokens)).toString());
@@ -102,17 +124,17 @@ async function getNodeInfo() {
     node.lastActivePeriod = await contract.methods.getLastCommittedPeriod(account).call();
   }
   node.stakerAddress = account;
-  node.substakes = await getSubStakes();
-  node.flags =  await getFlagsForStaker();
+  node.substakes = await getSubStakes(account);
+  node.flags =  await getFlagsForStaker(account);
   node.currentPeriod = await getCurrentPeriod();
   node.stakerBalance = await getBalance(node.stakerAddress);
   node.workerBalance = await getBalance(node.workerAddress);
   node.workerState = getWorkerState(node.currentPeriod,node.lastActivePeriod)
-  node.lastConfirmationCost = await getLastGasCost();
+  node.lastConfirmationCost = await getLastGasCost(account);
   return node;
 }
 
-async function getSubStakes() {
+async function getSubStakes(account) {
   const substakesCount = await contract.methods.getSubStakesLength(account).call();
   const substakes = [];
   for (let currentSubStakeIndex = 0; currentSubStakeIndex < substakesCount; currentSubStakeIndex++) {
@@ -142,16 +164,16 @@ async function getCurrentPeriod() {
   return await contract.methods.getCurrentPeriod().call();
 }
 
-async function getFlagsForStaker() {
+async function getFlagsForStaker(account) {
   const flags = await contract.methods.getFlags(account).call();
   return flags;
 }
 
-async function getBalance(address) {
-  return web3.utils.fromWei(await web3.eth.getBalance(address));
+async function getBalance(account) {
+  return web3.utils.fromWei(await web3.eth.getBalance(account));
 }
 
-async function getLastGasCost()
+async function getLastGasCost(account)
 {
 
   const activityConfirmedEvents = (await contract.getPastEvents('CommitmentMade', { filter: { staker: account }, fromBlock: 0, toBlock: 'latest' }));//.map(a => { return { type: 'commitmentMade', block: a.blockNumber, ...a.returnValues } });
@@ -171,24 +193,7 @@ function nodeSumary(node)
   return (({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw }) => ({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw  }))(node);
 }
 
-async function checkNodeState()
-{
-  const nodeInfo = await getNodeInfo();
-  if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
-  {
-    telegrambot("Everything OK!",nodeSumary(nodeInfo))
-  } else
-  {
-    telegrambot("Something went wrong ...",nodeSumary(nodeInfo))
-    setTimeout(checkNodeState, 3600000); //3600000 = 1 hour
-  }
-}
 
-checkNodeState().then(result => {
-  // ...
-}).catch(error => {
-  // if you have an error
-})
 
 
 

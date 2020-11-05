@@ -2,6 +2,66 @@ const Web3 = require("web3");
 const BN = require('bignumber.js');
 const Telegraf = require('telegraf');
 const { Markup } = Telegraf;
+const CronJob = require('cron').CronJob;;
+const emojis = {ok: "👌",warning: "‼️",bell_on:"🔔",bell_off:"🔕",follow_on:"✅",follow_off:"☑️",refresh:"🔄"};
+
+const job = new CronJob('00 01 * * *', function() {
+  checkClients()
+});
+
+job.start();
+
+const clients = [];
+const interval = 1000; //3600000 = 1 hour
+
+function getClientIndex(chatId)
+{
+  for (let i = 0; i < clients.length; i++) {
+    if (clients[i].chatId = chatId)
+    {
+      return i;
+    }
+  }
+  throw "Unknown"
+}
+
+
+function setClient(chatId,account,lastMessage,ok,warning)
+{
+  const client = {};
+  client.chatId = chatId;
+  client.account = account;
+  client.lastMessage = lastMessage;
+  client.ok = ok;
+  client.warning = warning;
+  try { 
+    index = getClientIndex(chatId);
+    clients[index] = client;
+    return client;
+  }
+  catch (e) { //Add the a new client
+    clients.push(client);
+    return client;
+  }
+}
+
+function deleteClient(chatId,account)
+{
+  //returns an empty client to create the Keyboard with defaults
+  const client = {};
+  client.chatId = chatId;
+  client.account = account;
+  client.ok = false;
+  client.warning = true;
+  try { 
+    index = getClientIndex(chatId);
+    clients.splice(index, 1);
+    return client;
+  }
+  catch (e) { 
+    return client;
+  }
+}
 
 // Set proper environment variables before launch or run with BOT_TOKEN=123...456 INFURA_TOKEN=123..456 node nucypher-bot.js
 const token = process.env.BOT_TOKEN;
@@ -10,6 +70,103 @@ const infura_token = process.env.INFURA_TOKEN;
 const web3 = new Web3(new Web3.providers.HttpProvider(`https://mainnet.infura.io/v3/${infura_token}`));
 
 const { StakingEscrow } = require('./contract-registry');
+
+async function checkClientAndNotify(client)
+{
+  const account = client.account;
+  const chatId = client.chatId;
+  const lastMessage = client.lastMessage
+  const nodeInfo = await getNodeInfo(account);
+  const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod)}\n\n${nodeSumary(nodeInfo)}`;
+  const keyboard = getKeyboard(client);
+
+  if (nodeInfo.lastActivePeriod<=nodeInfo.currentPeriod) 
+  {
+    if (client.warning)
+    {
+        bot.telegram.deleteMessage(chatId,lastMessage)
+        bot.telegram.sendMessage(chatId,text, keyboard).then((m) => {
+          setClient(chatId,account,m.message_id,client.ok,client.warning);
+        })
+    } else
+    {
+      bot.telegram.editMessageText(
+        chatId,
+        lastMessage,
+        undefined,
+        text,
+        keyboard
+      ).catch(function(e) {
+        if (e.code != 400) console.log(e); // 400 corresponds to message and keyboard are the same
+      });
+    }
+    setTimeout(checkClientAndNotify, interval,client); 
+  } else
+  {
+    if (client.ok)
+    {
+        bot.telegram.deleteMessage(chatId,lastMessage)
+        bot.telegram.sendMessage(chatId,text, keyboard).then((m) => {
+          setClient(chatId,account,m.message_id,client.ok,client.warning);
+        })
+    } else
+    {
+      bot.telegram.editMessageText(
+        chatId,
+        lastMessage,
+        undefined,
+        text,
+        keyboard
+      ).catch(function(e) {
+        if (e.code != 400) console.log(e); // 400 corresponds to message and keyboard are the same
+      });
+    }
+  }
+}
+
+async function checkClients()
+{
+  for (const client of clients){
+    console.log(`notifiy ${client.chatId} for account ${client.account}`);
+    checkClientAndNotify(client);
+  } 
+}
+
+function getShortFeedback(lastActivePeriod,currentPeriod)
+{
+  if (lastActivePeriod>currentPeriod) 
+  {
+    return `${emojis.ok} Everything OK!`
+  } else
+  {
+    return `${emojis.warning} Something went wrong ...`
+  }
+}
+
+function getKeyboard(client)
+{
+  const address = client.account;
+  const monitor = !!client.lastMessage;
+  const ok = client.ok;
+  const warning = client.warning;
+  
+  if (monitor) 
+  {
+    return Markup.inlineKeyboard([
+      Markup.callbackButton(`${emojis.refresh} Refresh`, `refresh ${address}`),
+      Markup.callbackButton(`${emojis.follow_on} Following`, `unfollow ${address}`) ,
+      (ok ? Markup.callbackButton(`${emojis.ok}${emojis.bell_on}`, `follow ${address} false ${warning}`) : Markup.callbackButton(`${emojis.ok}${emojis.bell_off}`, `follow ${address} true ${warning}`)),
+      (warning ? Markup.callbackButton(`${emojis.warning}${emojis.bell_on}`, `follow ${address} ${ok} false`) : Markup.callbackButton(`${emojis.warning}${emojis.bell_off}`, `follow ${address} ${ok} true`)),
+    ]).extra()
+  } else
+  {
+    return Markup.inlineKeyboard([
+      Markup.callbackButton(`${emojis.refresh} Refresh`, `refresh ${address}`),
+      Markup.callbackButton(`${emojis.follow_off} Following`, `follow ${address} ${ok} ${warning}`)
+    ]).extra()
+  }
+}
+
 
 const contracts = {
   "stakingEscrowAddress": "0xbbD3C0C794F40c4f993B03F65343aCC6fcfCb2e2",
@@ -26,38 +183,99 @@ bot.start(async (ctx) => {
   if (!!ctx.startPayload && web3.utils.checkAddressChecksum(ctx.startPayload))
   {
     const account = ctx.startPayload;
+    const chatId = ctx.message.chat.id;
     const nodeInfo = await getNodeInfo(account);
+    const client = deleteClient(chatId,account); //reset client
+    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod)}\n\n${nodeSumary(nodeInfo)}`;
+    const keyboard = getKeyboard(client);
+
     if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
     {
-      ctx.replyWithHTML(`Everything OK! \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
+      ctx.replyWithHTML(text, keyboard)
     } else
     {
-      ctx.replyWithHTML(`Something went wrong ... \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
+      ctx.replyWithHTML(text,keyboard)
     }
-  } else
+  } else //TODO: recover account from Clients when cleaning chats
   {
-    ctx.replyWithHTML(`You haven't provide an Ethereum addreess.\n\n Call /refresh with your staker address to get the node information`)
+    ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
   }
 })
 
-bot.command('refresh', async (ctx) => {
-  const account = ctx.update.message.text.slice(9);
-  if (!!account && web3.utils.checkAddressChecksum(account))
+bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, (ctx) => {
+  if ((!!ctx.match)&&(ctx.match.length>3)&&web3.utils.checkAddressChecksum(ctx.match[1]))
   {
-    const nodeInfo = await getNodeInfo(account);
-    if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
-    {
-      ctx.replyWithHTML(`Everything OK! \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
-    } else
-    {
-      ctx.replyWithHTML(`Something went wrong ... \n\n<pre> ${JSON.stringify(nodeSumary(nodeInfo) , null, 2)} </pre>`, Markup.keyboard([`/refresh ${account}`]).resize().extra())
-    }
-  } else
-  {
-    ctx.replyWithHTML(`You haven't provide an Ethereum addreess.\n\n Call /refresh with your staker address to get the node information`)
+    console.log(`follow account=${ctx.match[1]} ok=${ctx.match[2]} warning=${ctx.match[3]}`);
+    const chatId = ctx.callbackQuery.message.chat.id;
+    const messageId = ctx.callbackQuery.message.message_id;
+    const text = ctx.callbackQuery.message.text;
+    const account = ctx.match[1];
+    const ok = (ctx.match[2] == 'true');
+    const warning = (ctx.match[3] == 'true');
+    const client = setClient(chatId,account,messageId,ok,warning);
+    ctx.telegram.editMessageText(
+      chatId,
+      messageId,
+      undefined,
+      text,
+      getKeyboard(client)
+    );
   }
 })
 
+bot.action(/^unfollow (.*)/, (ctx) => {
+  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.checkAddressChecksum(ctx.match[1]))
+  {
+    console.log("unfollow "+ctx.match[1]);
+    const chatId = ctx.callbackQuery.message.chat.id;
+    const messageId = ctx.callbackQuery.message.message_id;
+    const text = ctx.callbackQuery.message.text;
+    const account = ctx.match[1];
+    const client = deleteClient(chatId,account);
+    ctx.telegram.editMessageText(
+      chatId,
+      messageId,
+      undefined,
+      text,
+      getKeyboard(client)
+    );
+  }
+})
+
+bot.action(/^refresh (.*)/, async (ctx) => {
+  
+  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.checkAddressChecksum(ctx.match[1]))
+  {
+    console.log("refresh "+ctx.match[1]);
+    const account = ctx.match[1];
+    const chatId = ctx.callbackQuery.message.chat.id;
+    const messageId = ctx.callbackQuery.message.message_id;
+    const messageText = ctx.callbackQuery.message.text;
+    const client = {};
+    try {
+      client = clients[getClientIndex(chatId)];
+    } catch (error) {
+      client.chatId = chatId;
+      client.account = account;
+      client.lastMessage = messageId;
+    }   
+    const nodeInfo = await getNodeInfo(account);
+    const msg = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod)}\n\n${nodeSumary(nodeInfo)}`;    
+    if (msg != messageText)
+    {
+      ctx.telegram.editMessageText(
+        chatId,
+        messageId,
+        undefined,
+        msg,
+        getKeyboard({})
+      );
+    }
+  } else
+  {
+    ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
+  }
+})
 
 bot.launch()
 
@@ -188,9 +406,9 @@ async function getLastGasCost(account)
   return gasCost
 }
 
-function nodeSumary(node)
+function nodeSumary(node) //TODO: Beautify
 {
-  return (({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw }) => ({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw  }))(node);
+  return JSON.stringify( (({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw }) => ({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw  }))(node)  , null, 2)
 }
 
 

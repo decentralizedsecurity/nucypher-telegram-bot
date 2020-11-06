@@ -184,7 +184,7 @@ const contract = new web3.eth.Contract(StakingEscrow, contracts.stakingEscrowAdd
 const bot = new Telegraf(token)
 
 bot.start(async (ctx) => {
-  if (!!ctx.startPayload && web3.utils.checkAddressChecksum(ctx.startPayload))
+  if (!!ctx.startPayload && web3.utils.isAddress(ctx.startPayload))
   {
     const account = ctx.startPayload;
     const chatId = ctx.message.chat.id;
@@ -208,7 +208,7 @@ bot.start(async (ctx) => {
 })
 
 bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx) => {
-  if ((!!ctx.match)&&(ctx.match.length>3)&&web3.utils.checkAddressChecksum(ctx.match[1]))
+  if ((!!ctx.match)&&(ctx.match.length>3)&&web3.utils.isAddress(ctx.match[1]))
   {
     console.log(`follow account=${ctx.match[1]} ok=${ctx.match[2]} warning=${ctx.match[3]}`);
     const chatId = ctx.callbackQuery.message.chat.id;
@@ -227,7 +227,7 @@ bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx
 })
 
 bot.action(/^unfollow (.*)/, async (ctx) => {
-  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.checkAddressChecksum(ctx.match[1]))
+  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.isAddress(ctx.match[1]))
   {
     console.log("unfollow "+ctx.match[1]);
     const chatId = ctx.callbackQuery.message.chat.id;
@@ -245,7 +245,7 @@ bot.action(/^unfollow (.*)/, async (ctx) => {
 
 bot.action(/^refresh (.*)/, async (ctx) => {
   
-  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.checkAddressChecksum(ctx.match[1]))
+  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.isAddress(ctx.match[1]))
   {
     console.log("refresh "+ctx.match[1]);
     const account = ctx.match[1];

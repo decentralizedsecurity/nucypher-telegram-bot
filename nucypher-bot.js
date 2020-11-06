@@ -156,12 +156,12 @@ function getKeyboard(client)
   
   if (monitor) 
   {
-    return Markup.inlineKeyboard([
+    return Markup.inlineKeyboard([[
       Markup.callbackButton(`${emojis.refresh} Refresh`, `refresh ${address}`),
-      Markup.callbackButton(`${emojis.follow_on} Following`, `unfollow ${address}`) ,
+      Markup.callbackButton(`${emojis.follow_on} Following`, `unfollow ${address}`)] ,[
       (ok ? Markup.callbackButton(`${emojis.ok}${emojis.bell_on}`, `follow ${address} false ${warning}`) : Markup.callbackButton(`${emojis.ok}${emojis.bell_off}`, `follow ${address} true ${warning}`)),
       (warning ? Markup.callbackButton(`${emojis.warning}${emojis.bell_on}`, `follow ${address} ${ok} false`) : Markup.callbackButton(`${emojis.warning}${emojis.bell_off}`, `follow ${address} ${ok} true`)),
-    ]).extra()
+    ]]).extra()
   } else
   {
     return Markup.inlineKeyboard([
@@ -214,19 +214,15 @@ bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx
     const chatId = ctx.callbackQuery.message.chat.id;
     const messageId = ctx.callbackQuery.message.message_id;
     const account = ctx.match[1];
-    const nodeInfo = await getNodeInfo(account);
-    const timestamp = new Date().getTime();
-    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
     const ok = (ctx.match[2] == 'true');
     const warning = (ctx.match[3] == 'true');
     const keyboard = getKeyboard(setClient(chatId,account,messageId,ok,warning));
-    ctx.telegram.editMessageText(
+    ctx.telegram.editMessageReplyMarkup(
       chatId,
       messageId,
       undefined,
-      text,
-      {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}
-      );
+      keyboard.reply_markup
+    )
   }
 })
 
@@ -236,19 +232,14 @@ bot.action(/^unfollow (.*)/, async (ctx) => {
     console.log("unfollow "+ctx.match[1]);
     const chatId = ctx.callbackQuery.message.chat.id;
     const messageId = ctx.callbackQuery.message.message_id;
-    //const text = ctx.callbackQuery.message.text;
     const account = ctx.match[1];
-    const nodeInfo = await getNodeInfo(account);
-    const timestamp = new Date().getTime();
-    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;   
-    const client = deleteClient(chatId,account);
-    ctx.telegram.editMessageText(
+    const keyboard = getKeyboard(deleteClient(chatId,account));
+    ctx.telegram.editMessageReplyMarkup(
       chatId,
       messageId,
       undefined,
-      text,
-      {parse_mode:"HTML",reply_markup:getKeyboard(client).reply_markup,disable_web_page_preview:"True"}
-    );
+      keyboard.reply_markup
+    )
   }
 })
 
@@ -449,10 +440,3 @@ AvailableForWithdraw
   ▶️ <code>${round(node.availableForWithdraw,2)} NU</code>
 `
 }
-
-
-
-
-
-
-

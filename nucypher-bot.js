@@ -76,8 +76,9 @@ async function checkClientAndNotify(client)
   const account = client.account;
   const chatId = client.chatId;
   const lastMessage = client.lastMessage
+  const timestamp = new Date().getTime();
   const nodeInfo = await getNodeInfo(account);
-  const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod)}\n\n${nodeSumary(nodeInfo)}`;
+  const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
   const keyboard = getKeyboard(client);
 
   if (nodeInfo.lastActivePeriod<=nodeInfo.currentPeriod) 
@@ -85,7 +86,7 @@ async function checkClientAndNotify(client)
     if (client.warning)
     {
         bot.telegram.deleteMessage(chatId,lastMessage)
-        bot.telegram.sendMessage(chatId,text, keyboard).then((m) => {
+        bot.telegram.sendMessage(chatId,text, {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then((m) => {
           setClient(chatId,account,m.message_id,client.ok,client.warning);
         })
     } else
@@ -95,7 +96,7 @@ async function checkClientAndNotify(client)
         lastMessage,
         undefined,
         text,
-        keyboard
+        {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}
       ).catch(function(e) {
         if (e.code != 400) console.log(e); // 400 corresponds to message and keyboard are the same
       });
@@ -106,7 +107,7 @@ async function checkClientAndNotify(client)
     if (client.ok)
     {
         bot.telegram.deleteMessage(chatId,lastMessage)
-        bot.telegram.sendMessage(chatId,text, keyboard).then((m) => {
+        bot.telegram.sendMessage(chatId,text, {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then((m) => {
           setClient(chatId,account,m.message_id,client.ok,client.warning);
         })
     } else
@@ -116,7 +117,7 @@ async function checkClientAndNotify(client)
         lastMessage,
         undefined,
         text,
-        keyboard
+        {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}
       ).catch(function(e) {
         if (e.code != 400) console.log(e); // 400 corresponds to message and keyboard are the same
       });
@@ -127,19 +128,22 @@ async function checkClientAndNotify(client)
 async function checkClients()
 {
   for (const client of clients){
-    console.log(`notifiy ${client.chatId} for account ${client.account}`);
+    console.log(`notify ${client.chatId} for account ${client.account}`);
     checkClientAndNotify(client);
   } 
 }
 
-function getShortFeedback(lastActivePeriod,currentPeriod)
+function getShortFeedback(lastActivePeriod,currentPeriod,timestamp)
 {
+  const time = new Date(timestamp).toISOString().slice(-13, -5);
+  const date = new Date(timestamp).toISOString().slice(0, 10);
+  //TODO: improve time and date presentation ... https://stackoverflow.com/a/35890537 
   if (lastActivePeriod>currentPeriod) 
   {
-    return `${emojis.ok} Everything OK!`
+    return `${emojis.ok} Everything OK!\nLast update: ${time} UTC ${date}`
   } else
   {
-    return `${emojis.warning} Something went wrong ...`
+    return `${emojis.warning} Something went wrong ...\nLast update: ${time} UTC ${date}`
   }
 }
 
@@ -184,17 +188,18 @@ bot.start(async (ctx) => {
   {
     const account = ctx.startPayload;
     const chatId = ctx.message.chat.id;
+    const timestamp = new Date().getTime();
     const nodeInfo = await getNodeInfo(account);
     const client = deleteClient(chatId,account); //reset client
-    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod)}\n\n${nodeSumary(nodeInfo)}`;
+    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
     const keyboard = getKeyboard(client);
 
     if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
     {
-      ctx.replyWithHTML(text, keyboard)
+      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"})
     } else
     {
-      ctx.replyWithHTML(text,keyboard)
+      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"})
     }
   } else //TODO: recover account from Clients when cleaning chats
   {
@@ -202,42 +207,47 @@ bot.start(async (ctx) => {
   }
 })
 
-bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, (ctx) => {
+bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx) => {
   if ((!!ctx.match)&&(ctx.match.length>3)&&web3.utils.checkAddressChecksum(ctx.match[1]))
   {
     console.log(`follow account=${ctx.match[1]} ok=${ctx.match[2]} warning=${ctx.match[3]}`);
     const chatId = ctx.callbackQuery.message.chat.id;
     const messageId = ctx.callbackQuery.message.message_id;
-    const text = ctx.callbackQuery.message.text;
     const account = ctx.match[1];
+    const nodeInfo = await getNodeInfo(account);
+    const timestamp = new Date().getTime();
+    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
     const ok = (ctx.match[2] == 'true');
     const warning = (ctx.match[3] == 'true');
-    const client = setClient(chatId,account,messageId,ok,warning);
+    const keyboard = getKeyboard(setClient(chatId,account,messageId,ok,warning));
     ctx.telegram.editMessageText(
       chatId,
       messageId,
       undefined,
       text,
-      getKeyboard(client)
-    );
+      {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}
+      );
   }
 })
 
-bot.action(/^unfollow (.*)/, (ctx) => {
+bot.action(/^unfollow (.*)/, async (ctx) => {
   if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.checkAddressChecksum(ctx.match[1]))
   {
     console.log("unfollow "+ctx.match[1]);
     const chatId = ctx.callbackQuery.message.chat.id;
     const messageId = ctx.callbackQuery.message.message_id;
-    const text = ctx.callbackQuery.message.text;
+    //const text = ctx.callbackQuery.message.text;
     const account = ctx.match[1];
+    const nodeInfo = await getNodeInfo(account);
+    const timestamp = new Date().getTime();
+    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;   
     const client = deleteClient(chatId,account);
     ctx.telegram.editMessageText(
       chatId,
       messageId,
       undefined,
       text,
-      getKeyboard(client)
+      {parse_mode:"HTML",reply_markup:getKeyboard(client).reply_markup,disable_web_page_preview:"True"}
     );
   }
 })
@@ -249,8 +259,9 @@ bot.action(/^refresh (.*)/, async (ctx) => {
     console.log("refresh "+ctx.match[1]);
     const account = ctx.match[1];
     const chatId = ctx.callbackQuery.message.chat.id;
+    const keyboard = ctx.callbackQuery.message.reply_markup;
+    const timestamp = new Date().getTime();
     const messageId = ctx.callbackQuery.message.message_id;
-    const messageText = ctx.callbackQuery.message.text;
     const client = {};
     try {
       client = clients[getClientIndex(chatId)];
@@ -260,17 +271,14 @@ bot.action(/^refresh (.*)/, async (ctx) => {
       client.lastMessage = messageId;
     }   
     const nodeInfo = await getNodeInfo(account);
-    const msg = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod)}\n\n${nodeSumary(nodeInfo)}`;    
-    if (msg != messageText)
-    {
-      ctx.telegram.editMessageText(
-        chatId,
-        messageId,
-        undefined,
-        msg,
-        getKeyboard({})
-      );
-    }
+    const msg = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;    
+    ctx.telegram.editMessageText(
+      chatId,
+      messageId,
+      undefined,
+      msg,
+      {parse_mode:"HTML",reply_markup:keyboard,disable_web_page_preview:"True"}
+    );
   } else
   {
     ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
@@ -406,9 +414,40 @@ async function getLastGasCost(account)
   return gasCost
 }
 
-function nodeSumary(node) //TODO: Beautify
+function shortenAddress(address)
 {
-  return JSON.stringify( (({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw }) => ({ stakerAddress, stakerBalance,workerAddress,workerBalance,workerState,lastConfirmationCost,availableForWithdraw  }))(node)  , null, 2)
+  const n = 8;
+  return address.slice(0,n+2)+"..."+address.slice(-n);
+}
+
+function round(number,digits)
+{
+  return Number(Math.round(number + `e${digits}`) + `e-${digits}`);
+}
+
+function checkWorkerBalance(workerBalance,lastConfirmationCost)
+{
+  check = "";
+  if (workerBalance<lastConfirmationCost*2) check= "❗"
+  return check;
+}
+function nodeSumary(node)
+{
+  return `StakerAddress
+  ▶️ <a href="https://etherscan.io/address/${node.stakerAddress}">${shortenAddress(node.stakerAddress)}</a>
+StakerBalance
+  ▶️ <code>${round(node.stakerBalance,6)} ETH</code>
+WorkerAddress
+  ▶️ <a href="https://etherscan.io/address/${node.workerAddress}">${shortenAddress(node.workerAddress)}</a>
+WorkerBalance
+  ▶️ <code>${checkWorkerBalance(node.workerBalance,node.lastConfirmationCost)}${round(node.workerBalance,6)} ETH</code>
+WorkerState
+  ▶️ ${node.workerState}
+LastConfirmationCost
+  ▶️ <code>${round(node.lastConfirmationCost,6)} ETH</code>
+AvailableForWithdraw
+  ▶️ <code>${round(node.availableForWithdraw,2)} NU</code>
+`
 }
 
 

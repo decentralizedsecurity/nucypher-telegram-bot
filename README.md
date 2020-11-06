@@ -16,7 +16,7 @@ That will return some relevant information about your stake and display a Telegr
 
 - Refresh (:arrows_counterclockwise:): This button let you refresh the information. The refresh is performed by editing the message so you wont see a notification or a new message, just an animation showing that the information has been refreshed.
 
-- Following (:white_check_mark:): This button will show you information about the scheduled notifications and let you change the settings. If Following is enables you will see two additional button:
+- Following (:white_check_mark:): This button will show you information about the scheduled notifications and let you change the settings. If Following is enabled you will see two additional button:
 
 - Green light notifications (:ok_hand:): This controls how to notify when the node is performing properly
 

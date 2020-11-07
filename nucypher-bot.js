@@ -2,14 +2,18 @@ const Web3 = require("web3");
 const BN = require('bignumber.js');
 const Telegraf = require('telegraf');
 const { Markup } = Telegraf;
-const CronJob = require('cron').CronJob;;
+const CronJob = require('cron').CronJob;
+
+const storage = require('node-persist');
+
+
 const emojis = {ok: "👌",warning: "‼️",bell_on:"🔔",bell_off:"🔕",follow_on:"✅",follow_off:"☑️",refresh:"🔄"};
 
 const job = new CronJob('00 01 * * *', function() {
   checkClients()
 });
 
-job.start();
+const persist = (process.env.PERSIST == 'true');
 
 const clients = [];
 const interval = 1000; //3600000 = 1 hour
@@ -22,11 +26,27 @@ function getClientIndex(chatId)
       return i;
     }
   }
-  throw "Unknown"
+  return undefined;
 }
 
+async function getClient(chatId)
+{
+  if (persist)
+  {
+    return await storage.getItem(chatId.toString())
+  } else 
+  {
+    if (index = getClientIndex(chatId))
+    {
+      return clients[index];
+    } else
+    {
+      return undefined;
+    }
+  }
+}
 
-function setClient(chatId,account,lastMessage,ok,warning)
+async function setClient(chatId,account,lastMessage,ok,warning)
 {
   const client = {};
   client.chatId = chatId;
@@ -34,18 +54,26 @@ function setClient(chatId,account,lastMessage,ok,warning)
   client.lastMessage = lastMessage;
   client.ok = ok;
   client.warning = warning;
-  try { 
-    index = getClientIndex(chatId);
-    clients[index] = client;
-    return client;
+
+  if (persist)
+  {
+    await storage.setItem(chatId.toString(),client)
+  } else 
+  {
+    if (index = getClientIndex(chatId))
+    {
+      clients[index] = client;
+    } else
+    {
+      clients.push(client);
+    }
   }
-  catch (e) { //Add the a new client
-    clients.push(client);
-    return client;
-  }
+
+  return client;
+  
 }
 
-function deleteClient(chatId,account)
+async function deleteClient(chatId,account)
 {
   //returns an empty client to create the Keyboard with defaults
   const client = {};
@@ -53,14 +81,20 @@ function deleteClient(chatId,account)
   client.account = account;
   client.ok = false;
   client.warning = true;
-  try { 
-    index = getClientIndex(chatId);
-    clients.splice(index, 1);
-    return client;
+
+  if (persist)
+  {
+    await storage.removeItem(chatId.toString())
+  } else 
+  {
+    if (index = getClientIndex(chatId)) 
+    {
+      clients.splice(index, 1);
+    }
   }
-  catch (e) { 
-    return client;
-  }
+
+  return client;
+
 }
 
 // Set proper environment variables before launch or run with BOT_TOKEN=123...456 INFURA_TOKEN=123..456 node nucypher-bot.js
@@ -127,7 +161,16 @@ async function checkClientAndNotify(client)
 
 async function checkClients()
 {
-  for (const client of clients){
+  let clientList = []
+  if (persist)
+  {
+    clientList = await storage.values();
+  } else
+  {
+    clientList = clients;
+
+  }
+  for (const client of clientList){
     console.log(`notify ${client.chatId} for account ${client.account}`);
     checkClientAndNotify(client);
   } 
@@ -190,7 +233,7 @@ bot.start(async (ctx) => {
     const chatId = ctx.message.chat.id;
     const timestamp = new Date().getTime();
     const nodeInfo = await getNodeInfo(account);
-    const client = deleteClient(chatId,account); //reset client
+    const client = await deleteClient(chatId,account); //reset client
     const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
     const keyboard = getKeyboard(client);
 
@@ -216,7 +259,7 @@ bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx
     const account = ctx.match[1];
     const ok = (ctx.match[2] == 'true');
     const warning = (ctx.match[3] == 'true');
-    const keyboard = getKeyboard(setClient(chatId,account,messageId,ok,warning));
+    const keyboard = getKeyboard(await setClient(chatId,account,messageId,ok,warning));
     ctx.telegram.editMessageReplyMarkup(
       chatId,
       messageId,
@@ -233,7 +276,7 @@ bot.action(/^unfollow (.*)/, async (ctx) => {
     const chatId = ctx.callbackQuery.message.chat.id;
     const messageId = ctx.callbackQuery.message.message_id;
     const account = ctx.match[1];
-    const keyboard = getKeyboard(deleteClient(chatId,account));
+    const keyboard = getKeyboard(await deleteClient(chatId,account));
     ctx.telegram.editMessageReplyMarkup(
       chatId,
       messageId,
@@ -253,10 +296,10 @@ bot.action(/^refresh (.*)/, async (ctx) => {
     const keyboard = ctx.callbackQuery.message.reply_markup;
     const timestamp = new Date().getTime();
     const messageId = ctx.callbackQuery.message.message_id;
-    const client = {};
-    try {
-      client = clients[getClientIndex(chatId)];
-    } catch (error) {
+    let client = await getClient(chatId);
+    if (!client)
+    {
+      client = {};
       client.chatId = chatId;
       client.account = account;
       client.lastMessage = messageId;
@@ -276,7 +319,11 @@ bot.action(/^refresh (.*)/, async (ctx) => {
   }
 })
 
-bot.launch()
+bot.launch().then(async () => {
+  console.log("Bot Started");
+  job.start();
+  if (persist) await storage.init({dir: 'clients'});
+});
 
 class Node {
   constructor(obj) {

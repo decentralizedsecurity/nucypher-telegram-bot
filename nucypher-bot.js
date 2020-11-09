@@ -227,7 +227,7 @@ const contract = new web3.eth.Contract(StakingEscrow, contracts.stakingEscrowAdd
 const bot = new Telegraf(token)
 
 bot.start(async (ctx) => {
-  if (!!ctx.startPayload && web3.utils.isAddress(ctx.startPayload))
+  if (!!ctx.startPayload && web3.utils.isAddress(ctx.startPayload) && web3.utils.isHexStrict(ctx.startPayload))
   {
     const account = ctx.startPayload;
     const chatId = ctx.message.chat.id;
@@ -239,19 +239,54 @@ bot.start(async (ctx) => {
 
     if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
     {
-      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"})
+      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
+        (m) => {
+          setClient(chatId,account,m.message_id,client.ok,client.warning);
+        }
+      )
     } else
     {
-      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"})
+      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
+        (m) => {
+          setClient(chatId,account,m.message_id,client.ok,client.warning);
+        }
+      )
     }
   } else //TODO: recover account from Clients when cleaning chats
   {
-    ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
+    const chatId = ctx.message.chat.id;
+    const client = await getClient(chatId);
+    if (client)
+    {
+      const account = client.account
+      const timestamp = new Date().getTime();
+      const nodeInfo = await getNodeInfo(account);
+      const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
+      const keyboard = getKeyboard(client);
+      if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
+      {
+        ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
+          (m) => {
+            setClient(chatId,account,m.message_id,client.ok,client.warning);
+            }
+        )
+      } else
+      {
+        ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
+          (m) => {
+            setClient(chatId,account,m.message_id,client.ok,client.warning);
+          }
+        )
+      }
+    } else
+    {
+      ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
+    }
   }
 })
 
 bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx) => {
-  if ((!!ctx.match)&&(ctx.match.length>3)&&web3.utils.isAddress(ctx.match[1]))
+  if ((!!ctx.match)&&(ctx.match.length>3)&&web3.utils.isAddress(ctx.match[1]) && web3.utils.isHexStrict(ctx.match[1]))
   {
     console.log(`follow account=${ctx.match[1]} ok=${ctx.match[2]} warning=${ctx.match[3]}`);
     const chatId = ctx.callbackQuery.message.chat.id;
@@ -270,7 +305,7 @@ bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx
 })
 
 bot.action(/^unfollow (.*)/, async (ctx) => {
-  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.isAddress(ctx.match[1]))
+  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.isAddress(ctx.match[1]) && web3.utils.isHexStrict(ctx.match[1]))
   {
     console.log("unfollow "+ctx.match[1]);
     const chatId = ctx.callbackQuery.message.chat.id;
@@ -288,7 +323,7 @@ bot.action(/^unfollow (.*)/, async (ctx) => {
 
 bot.action(/^refresh (.*)/, async (ctx) => {
   
-  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.isAddress(ctx.match[1]))
+  if ((!!ctx.match)&&(ctx.match.length>=1)&&web3.utils.isAddress(ctx.match[1]) && web3.utils.isHexStrict(ctx.match[1]))
   {
     console.log("refresh "+ctx.match[1]);
     const account = ctx.match[1];
@@ -322,7 +357,10 @@ bot.action(/^refresh (.*)/, async (ctx) => {
 bot.launch().then(async () => {
   console.log("Bot Started");
   job.start();
-  if (persist) await storage.init({dir: 'clients'});
+  if (persist) {
+    await storage.init({dir: 'clients'});
+    console.log("Persit True");
+  };
 });
 
 class Node {

@@ -112,7 +112,7 @@ async function checkClientAndNotify(client)
   const lastMessage = client.lastMessage
   const timestamp = new Date().getTime();
   const nodeInfo = await getNodeInfo(account);
-  const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
+  const text = `${getShortFeedback(nodeInfo,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
   const keyboard = getKeyboard(client);
 
   if (nodeInfo.lastActivePeriod<=nodeInfo.currentPeriod) 
@@ -181,8 +181,10 @@ async function checkClients()
   } 
 }
 
-function getShortFeedback(lastActivePeriod,currentPeriod,timestamp)
+function getShortFeedback(nodeInfo,timestamp)
 {
+  const lastActivePeriod = nodeInfo.lastActivePeriod;
+  const currentPeriod = nodeInfo.currentPeriod;
   const time = new Date(timestamp).toISOString().slice(-13, -5);
   const date = new Date(timestamp).toISOString().slice(0, 10);
   //TODO: improve time and date presentation ... https://stackoverflow.com/a/35890537 
@@ -231,63 +233,47 @@ const contract = new web3.eth.Contract(StakingEscrow, contracts.stakingEscrowAdd
 
 const bot = new Telegraf(token)
 
+async function sendUpdate(ctx, client)
+{
+  const timestamp = new Date().getTime();
+  const nodeInfo = await getNodeInfo(client.account);
+  const text = `${getShortFeedback(nodeInfo,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
+  const keyboard = getKeyboard(client);
+  if (client.lastMessage) //try to delete last message before sending a new
+  { 
+    bot.telegram.deleteMessage(client.chatId,client.lastMessage).catch(function(e) {
+      if (e.code != 400) console.log(e); // 400 corresponds to message can't be deleted
+    });
+  }
+  ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
+    async (m) => {
+      if (await getClient(client.chatId)) setClient(client.chatId,client.account,m.message_id,client.ok,client.warning);
+    }
+  )
+}
+
 bot.start(async (ctx) => {
+  const chatId = ctx.message.chat.id;
+  let client = await getClient(chatId);
+  let account = undefined;
   if (!!ctx.startPayload && web3.utils.isAddress(ctx.startPayload) && web3.utils.isHexStrict(ctx.startPayload))
   {
-    const account = ctx.startPayload;
-    const chatId = ctx.message.chat.id;
-    const timestamp = new Date().getTime();
-    const nodeInfo = await getNodeInfo(account);
-    const client = await deleteClient(chatId,account); //reset client
-    const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
-    const keyboard = getKeyboard(client);
-
-    if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
-    {
-      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
-        (m) => {
-          setClient(chatId,account,m.message_id,client.ok,client.warning);
-        }
-      )
-    } else
-    {
-      ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
-        (m) => {
-          setClient(chatId,account,m.message_id,client.ok,client.warning);
-        }
-      )
-    }
-  } else //TODO: recover account from Clients when cleaning chats
-  {
-    const chatId = ctx.message.chat.id;
-    const client = await getClient(chatId);
-    if (client)
-    {
-      const account = client.account
-      const timestamp = new Date().getTime();
-      const nodeInfo = await getNodeInfo(account);
-      const text = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
-      const keyboard = getKeyboard(client);
-      if (nodeInfo.lastActivePeriod>nodeInfo.currentPeriod) 
-      {
-        ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
-          (m) => {
-            setClient(chatId,account,m.message_id,client.ok,client.warning);
-            }
-        )
-      } else
-      {
-        ctx.replyWithHTML(text,{parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then(
-          (m) => {
-            setClient(chatId,account,m.message_id,client.ok,client.warning);
-          }
-        )
-      }
-    } else
-    {
-      ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
-    }
+    account = ctx.startPayload;
   }
+
+  if ((client && account && (client.account != account)) || (!client && account))
+  { //Only one account can be monitored at the same time, at least for now...
+    client = await deleteClient(chatId,account);
+  }
+
+  if (client)
+  {
+    await sendUpdate(ctx,client);
+  } else
+  {
+    ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)
+  }
+
 })
 
 bot.action(/^follow (0x[A-F,a-f,0-9]{40}) (true|false) (true|false)/, async (ctx) => {
@@ -335,24 +321,18 @@ bot.action(/^refresh (.*)/, async (ctx) => {
     const chatId = ctx.callbackQuery.message.chat.id;
     const keyboard = ctx.callbackQuery.message.reply_markup;
     const timestamp = new Date().getTime();
-    const messageId = ctx.callbackQuery.message.message_id;
-    let client = await getClient(chatId);
-    if (!client)
-    {
-      client = {};
-      client.chatId = chatId;
-      client.account = account;
-      client.lastMessage = messageId;
-    }   
+    const messageId = ctx.callbackQuery.message.message_id; 
     const nodeInfo = await getNodeInfo(account);
-    const msg = `${getShortFeedback(nodeInfo.lastActivePeriod,nodeInfo.currentPeriod,timestamp)}\n\n${nodeSumary(nodeInfo)}`;    
+    const msg = `${getShortFeedback(nodeInfo,timestamp)}\n\n${nodeSumary(nodeInfo)}`;    
     ctx.telegram.editMessageText(
       chatId,
       messageId,
       undefined,
       msg,
       {parse_mode:"HTML",reply_markup:keyboard,disable_web_page_preview:"True"}
-    );
+    ).catch(function(e) {
+      if (e.code != 400) console.log(e); // 400 corresponds to message and keyboard are the same
+    });
   } else
   {
     ctx.replyWithHTML(`You haven't provided an Ethereum address.\n\n Call /start with your staker address to get the node information`)

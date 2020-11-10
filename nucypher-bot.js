@@ -9,7 +9,7 @@ const storage = require('node-persist');
 
 const emojis = {ok: "👌",warning: "‼️",bell_on:"🔔",bell_off:"🔕",follow_on:"✅",follow_off:"☑️",refresh:"🔄"};
 
-const job = new CronJob('* * * * *', function() {
+const job = new CronJob('00 01 * * *', function() {
   checkClients()
 });
 
@@ -126,7 +126,7 @@ async function checkClientAndNotify(client)
         bot.telegram.sendMessage(chatId,text, {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then((m) => {
           setClient(chatId,account,m.message_id,client.ok,client.warning);
         })
-    } else // Edits the previous message, that way the cliente doesn't get a notification.
+    } else // Edits the previous message, that way the client doesn't get a notification.
     {
       bot.telegram.editMessageText(
         chatId,

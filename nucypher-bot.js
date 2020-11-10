@@ -14,6 +14,7 @@ const job = new CronJob('00 01 * * *', function() {
 });
 
 const persist = (process.env.PERSIST == 'true');
+const storage_path = process.env.STORAGE_PATH;
 
 const clients = [];
 const interval = 1000; //3600000 = 1 hour
@@ -343,7 +344,7 @@ bot.launch().then(async () => {
   console.log("Bot Started");
   job.start();
   if (persist) {
-    await storage.init({dir: 'clients'});
+    await storage.init({dir: storage_path});
     console.log("Persit True");
   };
 });

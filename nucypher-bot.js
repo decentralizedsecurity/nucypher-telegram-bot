@@ -9,7 +9,7 @@ const storage = require('node-persist');
 
 const emojis = {ok: "👌",warning: "‼️",bell_on:"🔔",bell_off:"🔕",follow_on:"✅",follow_off:"☑️",refresh:"🔄"};
 
-const job = new CronJob('00 01 * * *', function() {
+const job = new CronJob('* * * * *', function() {
   checkClients()
 });
 
@@ -117,13 +117,16 @@ async function checkClientAndNotify(client)
 
   if (nodeInfo.lastActivePeriod<=nodeInfo.currentPeriod) 
   {
-    if (client.warning)
+    if (client.warning) //Sends new Message and delete previous one. That way, the info is upated and the clientes gets a notification
     {
-        bot.telegram.deleteMessage(chatId,lastMessage)
+        bot.telegram.deleteMessage(chatId,lastMessage).catch(function(e) {
+          if (e.code != 400) console.log(e); // 400 corresponds to message can't be deleted
+          console.log
+        });
         bot.telegram.sendMessage(chatId,text, {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then((m) => {
           setClient(chatId,account,m.message_id,client.ok,client.warning);
         })
-    } else
+    } else // Edits the previous message, that way the cliente doesn't get a notification.
     {
       bot.telegram.editMessageText(
         chatId,
@@ -140,7 +143,9 @@ async function checkClientAndNotify(client)
   {
     if (client.ok)
     {
-        bot.telegram.deleteMessage(chatId,lastMessage)
+        bot.telegram.deleteMessage(chatId,lastMessage).catch(function(e) {
+          if (e.code != 400) console.log(e); // 400 corresponds to message can't be deleted
+        });
         bot.telegram.sendMessage(chatId,text, {parse_mode:"HTML",reply_markup:keyboard.reply_markup,disable_web_page_preview:"True"}).then((m) => {
           setClient(chatId,account,m.message_id,client.ok,client.warning);
         })

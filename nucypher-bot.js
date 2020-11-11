@@ -185,7 +185,7 @@ async function checkClients()
 
 function lowWorkerBalance(nodeInfo)
 {
-  return (nodeInfo.workerBalance<nodeInfo.lastConfirmationCost*200)
+  return (nodeInfo.workerBalance<nodeInfo.lastConfirmationCost*2)
 }
 
 function getShortFeedback(nodeInfo,timestamp)

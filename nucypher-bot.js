@@ -114,9 +114,10 @@ async function checkClientAndNotify(client)
   const timestamp = new Date().getTime();
   const nodeInfo = await getNodeInfo(account);
   const text = `${getShortFeedback(nodeInfo,timestamp)}\n\n${nodeSumary(nodeInfo)}`;
+  const warning = (text[0]==emojis.warning);
   const keyboard = getKeyboard(client);
 
-  if (nodeInfo.lastActivePeriod<=nodeInfo.currentPeriod) 
+  if (warning) 
   {
     if (client.warning) //Sends new Message and delete previous one. That way, the info is upated and the clientes gets a notification
     {
@@ -182,19 +183,37 @@ async function checkClients()
   } 
 }
 
+function lowWorkerBalance(nodeInfo)
+{
+  return (nodeInfo.workerBalance<nodeInfo.lastConfirmationCost*200)
+}
+
 function getShortFeedback(nodeInfo,timestamp)
 {
   const lastActivePeriod = nodeInfo.lastActivePeriod;
   const currentPeriod = nodeInfo.currentPeriod;
   const time = new Date(timestamp).toISOString().slice(-13, -5);
   const date = new Date(timestamp).toISOString().slice(0, 10);
-  //TODO: improve time and date presentation ... https://stackoverflow.com/a/35890537 
-  if (lastActivePeriod>currentPeriod) 
+  
+  if ((lastActivePeriod>currentPeriod) && !lowWorkerBalance(nodeInfo)) //Current period Ok and worker balance enough
   {
     return `${emojis.ok} Everything OK!\nLast update: ${time} UTC ${date}`
   } else
   {
-    return `${emojis.warning} Something went wrong ...\nLast update: ${time} UTC ${date}`
+    let error = "";
+    if (lastActivePeriod==currentPeriod)
+    {
+      error += '- Current period confirmed. Next period confirmation pending\n';
+    }
+    if (lastActivePeriod<currentPeriod)
+    {
+      error += '- Current period is not confirmed\n';
+    }
+    if (lowWorkerBalance(nodeInfo))
+    {
+      error += '- Worker balance is too low\n';
+    }
+    return `${emojis.warning} Something went wrong ...\n${error}Last update: ${time} UTC ${date}`
   }
 }
 
@@ -324,7 +343,7 @@ bot.action(/^refresh (.*)/, async (ctx) => {
     const timestamp = new Date().getTime();
     const messageId = ctx.callbackQuery.message.message_id; 
     const nodeInfo = await getNodeInfo(account);
-    const msg = `${getShortFeedback(nodeInfo,timestamp)}\n\n${nodeSumary(nodeInfo)}`;    
+    const msg = `${getShortFeedback(nodeInfo,timestamp)}\n\n${nodeSumary(nodeInfo)}`;   
     ctx.telegram.editMessageText(
       chatId,
       messageId,
@@ -487,12 +506,6 @@ function round(number,digits)
   return Number(Math.round(number + `e${digits}`) + `e-${digits}`);
 }
 
-function checkWorkerBalance(workerBalance,lastConfirmationCost)
-{
-  check = "";
-  if (workerBalance<lastConfirmationCost*2) check= "❗"
-  return check;
-}
 function nodeSumary(node)
 {
   return `StakerAddress
@@ -502,7 +515,7 @@ StakerBalance
 WorkerAddress
   ▶️ <a href="https://etherscan.io/address/${node.workerAddress}">${shortenAddress(node.workerAddress)}</a>
 WorkerBalance
-  ▶️ <code>${checkWorkerBalance(node.workerBalance,node.lastConfirmationCost)}${round(node.workerBalance,6)} ETH</code>
+  ▶️ <code>${(lowWorkerBalance(node))?(emojis.warning):""}${round(node.workerBalance,6)} ETH</code>
 WorkerState
   ▶️ ${node.workerState}
 LastConfirmationCost
